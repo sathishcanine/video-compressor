@@ -1,5 +1,5 @@
 name: vidcompressor
-description: VidPress — compress videos for any platform (UI + picker; compression simulated).
+description: VidPress — Flutter video compression with FFmpeg (presets + AdMob).
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -40,6 +40,9 @@ dependencies:
   gal: ^2.3.0
   path: ^1.9.1
   google_mobile_ads: ^8.0.0
+  ffmpeg_kit_flutter_min_gpl:
+    path: packages/ffmpeg_kit_flutter_min_gpl
+  path_provider: ^2.1.5
 
 dev_dependencies:
   flutter_test:

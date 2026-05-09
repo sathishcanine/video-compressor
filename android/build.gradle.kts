@@ -2,6 +2,9 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        // FFmpeg Kit binaries were removed from Maven Central after the project retired.
+        // This mirror still serves the AAR required by ffmpeg_kit_flutter_min_gpl.
+        maven { url = uri("https://artifactory.appodeal.com/appodeal-public") }
     }
 }
 

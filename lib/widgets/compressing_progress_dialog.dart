@@ -1,13 +1,18 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
 
+typedef CompressionJob = Future<String> Function(void Function(double progress01) onProgress);
+
 class CompressingProgressDialog extends StatefulWidget {
-  const CompressingProgressDialog({super.key, required this.presetLabel});
+  const CompressingProgressDialog({
+    super.key,
+    required this.presetLabel,
+    required this.job,
+  });
 
   final String presetLabel;
+  final CompressionJob job;
 
   @override
   State<CompressingProgressDialog> createState() => _CompressingProgressDialogState();
@@ -15,29 +20,27 @@ class CompressingProgressDialog extends StatefulWidget {
 
 class _CompressingProgressDialogState extends State<CompressingProgressDialog> {
   double _progress = 0;
-  Timer? _timer;
 
   @override
   void initState() {
     super.initState();
-    const totalMs = 2600;
-    const tick = 40;
-    var elapsed = 0;
-    _timer = Timer.periodic(const Duration(milliseconds: tick), (t) {
-      elapsed += tick;
-      final next = (elapsed / totalMs).clamp(0.0, 1.0);
-      setState(() => _progress = next);
-      if (elapsed >= totalMs) {
-        t.cancel();
-        if (mounted) Navigator.of(context).pop(true);
-      }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget
+          .job((p) {
+            if (mounted) {
+              setState(() => _progress = p.clamp(0.0, 1.0));
+            }
+          })
+          .then((path) {
+            if (mounted) Navigator.of(context).pop<String?>(path);
+          }, onError: (Object e, StackTrace _) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Compression failed: $e')),
+            );
+            Navigator.of(context).pop<String?>(null);
+          });
     });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
   }
 
   @override
@@ -75,7 +78,7 @@ class _CompressingProgressDialogState extends State<CompressingProgressDialog> {
             ClipRRect(
               borderRadius: BorderRadius.circular(999),
               child: LinearProgressIndicator(
-                value: _progress,
+                value: _progress <= 0.01 && _progress < 1 ? null : _progress.clamp(0.0, 1.0),
                 minHeight: 10,
                 backgroundColor: AppColors.background,
                 color: AppColors.primary,
@@ -83,7 +86,7 @@ class _CompressingProgressDialogState extends State<CompressingProgressDialog> {
             ),
             const SizedBox(height: 12),
             Text(
-              '$pct%',
+              _progress >= 1 ? '100%' : (_progress <= 0.01 ? 'Starting…' : '$pct%'),
               style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
             ),
           ],

@@ -10,6 +10,7 @@ import '../data/history_store.dart';
 import '../data/presets.dart';
 import '../models/compression_preset.dart';
 import '../models/custom_settings.dart';
+import '../services/video_compression_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/brand_header.dart';
 import '../widgets/compressing_progress_dialog.dart';
@@ -74,11 +75,9 @@ class _CompressScreenState extends State<CompressScreen> {
     setState(() => _selected = preset);
   }
 
-  int _savingsPercent() {
-    if (_selected?.isCustom ?? false) {
-      return _custom.estimatedReductionPercent();
-    }
-    return _selected!.estimatedSavingsPercent;
+  int _savingsPercentFromSizes(int originalBytes, int compressedBytes) {
+    if (originalBytes <= 0) return 0;
+    return (((originalBytes - compressedBytes) / originalBytes) * 100).round().clamp(0, 99);
   }
 
   String _presetLabelForProgress() {
@@ -95,16 +94,27 @@ class _CompressScreenState extends State<CompressScreen> {
     final preset = _selected!;
     final originalBytes = _file!.lengthSync();
     final originalMb = originalBytes / (1024 * 1024);
-    final pct = _savingsPercent();
-    final compressedMb = originalMb * (100 - pct) / 100;
 
-    await showDialog<void>(
+    final outputPath = await showDialog<String?>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => CompressingProgressDialog(presetLabel: _presetLabelForProgress()),
+      builder: (_) => CompressingProgressDialog(
+        presetLabel: _presetLabelForProgress(),
+        job: (setProgress) => VideoCompressionService.compress(
+          inputPath: _file!.path,
+          preset: preset,
+          custom: _custom,
+          onProgress: setProgress,
+        ),
+      ),
     );
 
     if (!mounted) return;
+    if (outputPath == null || outputPath.isEmpty) return;
+
+    final compressedBytes = File(outputPath).lengthSync();
+    final compressedMb = compressedBytes / (1024 * 1024);
+    final pct = _savingsPercentFromSizes(originalBytes, compressedBytes);
 
     final isCustom = preset.isCustom;
     final customSubtitle =
@@ -116,16 +126,18 @@ class _CompressScreenState extends State<CompressScreen> {
           preset: preset,
           isCustom: isCustom,
           customSubtitle: customSubtitle,
-          videoPath: _file!.path,
+          videoPath: outputPath,
           savingsPercent: pct,
           originalMb: originalMb,
           compressedMb: compressedMb,
           onSaveToGallery: () async {
-            await Gal.putVideo(_file!.path);
+            await Gal.putVideo(outputPath);
           },
         ),
       ),
     );
+
+    await VideoCompressionService.deleteFileIfExists(outputPath);
 
     if (!mounted) return;
     CompressionHistory.instance.add(
