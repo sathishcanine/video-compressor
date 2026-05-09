@@ -11,24 +11,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/compression_preset.dart';
 import '../models/custom_settings.dart';
-
-class _EncodeTarget {
-  const _EncodeTarget({
-    required this.boxW,
-    required this.boxH,
-    required this.fps,
-    required this.crf,
-    required this.x264Preset,
-    required this.audioBitrateK,
-  });
-
-  final int boxW;
-  final int boxH;
-  final int fps;
-  final int crf;
-  final String x264Preset;
-  final int audioBitrateK;
-}
+import 'compression_encode_params.dart';
 
 /// FFmpeg-based compression (libx264 + AAC). Output is always MP4 in a temp file.
 final class VideoCompressionService {
@@ -57,98 +40,7 @@ final class VideoCompressionService {
     }
   }
 
-  static _EncodeTarget _targetForPreset(CompressionPreset preset, CustomCompressionSettings custom) {
-    if (preset.isCustom) {
-      final crf = (36 - (custom.qualityPercent / 100) * 14).round().clamp(18, 35);
-      return switch (custom.resolution) {
-        VideoResolutionPreset.p480 => _EncodeTarget(
-            boxW: 854,
-            boxH: 480,
-            fps: custom.fpsValue,
-            crf: crf,
-            x264Preset: 'medium',
-            audioBitrateK: 96,
-          ),
-        VideoResolutionPreset.p720 => _EncodeTarget(
-            boxW: 720,
-            boxH: 1280,
-            fps: custom.fpsValue,
-            crf: crf,
-            x264Preset: 'medium',
-            audioBitrateK: 128,
-          ),
-        VideoResolutionPreset.p1080 => _EncodeTarget(
-            boxW: 1080,
-            boxH: 1920,
-            fps: custom.fpsValue,
-            crf: crf,
-            x264Preset: 'medium',
-            audioBitrateK: 160,
-          ),
-      };
-    }
-
-    return switch (preset.id) {
-      'instagram' => const _EncodeTarget(
-          boxW: 1080,
-          boxH: 1920,
-          fps: 30,
-          crf: 23,
-          x264Preset: 'medium',
-          audioBitrateK: 128,
-        ),
-      'whatsapp' => const _EncodeTarget(
-          boxW: 720,
-          boxH: 1280,
-          fps: 30,
-          crf: 28,
-          x264Preset: 'faster',
-          audioBitrateK: 96,
-        ),
-      'telegram' => const _EncodeTarget(
-          boxW: 720,
-          boxH: 1280,
-          fps: 30,
-          crf: 26,
-          x264Preset: 'fast',
-          audioBitrateK: 112,
-        ),
-      'high_quality' => const _EncodeTarget(
-          boxW: 1920,
-          boxH: 1080,
-          fps: 30,
-          crf: 18,
-          x264Preset: 'slow',
-          audioBitrateK: 192,
-        ),
-      'balanced' => const _EncodeTarget(
-          boxW: 720,
-          boxH: 1280,
-          fps: 30,
-          crf: 23,
-          x264Preset: 'medium',
-          audioBitrateK: 128,
-        ),
-      'max' => const _EncodeTarget(
-          boxW: 854,
-          boxH: 480,
-          fps: 30,
-          crf: 32,
-          x264Preset: 'veryfast',
-          audioBitrateK: 64,
-        ),
-      _ => const _EncodeTarget(
-          boxW: 720,
-          boxH: 1280,
-          fps: 30,
-          crf: 23,
-          x264Preset: 'medium',
-          audioBitrateK: 128,
-        ),
-    };
-  }
-
-  static String _vf(_EncodeTarget t) {
+  static String _vf(CompressionEncodeParams t) {
     return 'scale=${t.boxW}:${t.boxH}:force_original_aspect_ratio=decrease:force_divisible_by=2';
   }
 
@@ -165,7 +57,7 @@ final class VideoCompressionService {
     final outName = 'vidpress_${DateTime.now().millisecondsSinceEpoch}.mp4';
     final outputPath = p.join(tempDir.path, outName);
 
-    final t = _targetForPreset(preset, custom);
+    final t = compressionParamsFor(preset, custom);
     final vf = _vf(t);
 
     final args = <String>[

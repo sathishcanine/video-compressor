@@ -6,6 +6,16 @@ import '../theme/app_colors.dart';
 
 final kCompressionPresets = <CompressionPreset>[
   CompressionPreset(
+    id: 'custom',
+    name: 'Custom',
+    subtitle: 'Tap to configure',
+    estimatedSavingsPercent: 0,
+    iconBackground: const Color(0xFFD8F5F2),
+    badgeColor: const Color(0xFF14B8A6),
+    icon: Icons.settings_outlined,
+    isCustom: true,
+  ),
+  CompressionPreset(
     id: 'instagram',
     name: 'Instagram Reels',
     subtitle: '1080p • 30fps • H.264',
@@ -61,15 +71,5 @@ final kCompressionPresets = <CompressionPreset>[
     iconBackground: const Color(0xFFFFE4E4),
     badgeColor: const Color(0xFFEF4444),
     icon: Icons.file_download_outlined,
-  ),
-  CompressionPreset(
-    id: 'custom',
-    name: 'Custom',
-    subtitle: 'Tap to configure',
-    estimatedSavingsPercent: 0,
-    iconBackground: const Color(0xFFD8F5F2),
-    badgeColor: const Color(0xFF14B8A6),
-    icon: Icons.settings_outlined,
-    isCustom: true,
   ),
 ];

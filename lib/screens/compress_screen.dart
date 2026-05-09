@@ -15,6 +15,7 @@ import '../theme/app_colors.dart';
 import '../widgets/brand_header.dart';
 import '../widgets/compressing_progress_dialog.dart';
 import '../widgets/custom_settings_sheet.dart';
+import '../widgets/estimated_output_card.dart';
 import '../widgets/pick_video_panel.dart';
 import '../widgets/preset_option_card.dart';
 import '../widgets/video_info_card.dart';
@@ -126,6 +127,7 @@ class _CompressScreenState extends State<CompressScreen> {
           preset: preset,
           isCustom: isCustom,
           customSubtitle: customSubtitle,
+          originalVideoPath: _file!.path,
           videoPath: outputPath,
           savingsPercent: pct,
           originalMb: originalMb,
@@ -174,25 +176,34 @@ class _CompressScreenState extends State<CompressScreen> {
                           if (_file == null)
                             PickVideoPanel(onPick: _pickVideo)
                           else ...[
-                            if (c != null && c.value.isInitialized)
+                            if (c != null && c.value.isInitialized) ...[
                               VideoInfoCard(
                                 controller: c,
                                 file: _file!,
                                 onChange: _pickVideo,
-                              )
-                            else
+                              ),
+                              const SizedBox(height: 22),
+                              Text(
+                                'Choose a preset',
+                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                              ),
+                              const SizedBox(height: 12),
+                              EstimatedOutputCard(
+                                preset: _selected,
+                                custom: _custom,
+                                duration: c.value.duration,
+                                sourceWidth: c.value.size.width.round(),
+                                sourceHeight: c.value.size.height.round(),
+                                sourceFileBytes: _file!.lengthSync(),
+                              ),
+                              const SizedBox(height: 16),
+                            ] else
                               const Padding(
                                 padding: EdgeInsets.all(32),
                                 child: Center(child: CircularProgressIndicator()),
                               ),
-                            const SizedBox(height: 22),
-                            Text(
-                              'Choose a preset',
-                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                            ),
-                            const SizedBox(height: 12),
                           ],
                         ],
                       ),
@@ -201,24 +212,81 @@ class _CompressScreenState extends State<CompressScreen> {
                   if (_file != null)
                     SliverPadding(
                       padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
-                      sliver: SliverGrid(
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          mainAxisSpacing: 12,
-                          crossAxisSpacing: 12,
-                          childAspectRatio: 0.78,
-                        ),
-                        delegate: SliverChildBuilderDelegate(
-                          (context, index) {
-                            final preset = kCompressionPresets[index];
-                            final selected = _selected?.id == preset.id;
-                            return PresetOptionCard(
-                              preset: preset,
-                              selected: selected,
-                              onTap: () => _onPresetTap(preset),
+                      sliver: SliverToBoxAdapter(
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            const gap = 12.0;
+                            final rawW = constraints.maxWidth;
+                            final maxW = rawW.isFinite && rawW > 0
+                                ? rawW
+                                : MediaQuery.sizeOf(context).width - 40;
+                            final cellW = (maxW - gap) / 2;
+                            final custom = kCompressionPresets.firstWhere((p) => p.isCustom);
+                            final rest = kCompressionPresets.where((p) => !p.isCustom).toList();
+                            final rows = <Widget>[];
+
+                            rows.add(
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: gap),
+                                child: PresetOptionCard(
+                                  preset: custom,
+                                  selected: _selected?.id == custom.id,
+                                  onTap: () => _onPresetTap(custom),
+                                  horizontal: true,
+                                ),
+                              ),
+                            );
+
+                            for (var i = 0; i < rest.length; i += 2) {
+                              final isPair = i + 1 < rest.length;
+                              if (isPair) {
+                                rows.add(
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: gap),
+                                    child: Row(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        SizedBox(
+                                          width: cellW,
+                                          child: PresetOptionCard(
+                                            preset: rest[i],
+                                            selected: _selected?.id == rest[i].id,
+                                            onTap: () => _onPresetTap(rest[i]),
+                                          ),
+                                        ),
+                                        SizedBox(width: gap),
+                                        SizedBox(
+                                          width: cellW,
+                                          child: PresetOptionCard(
+                                            preset: rest[i + 1],
+                                            selected: _selected?.id == rest[i + 1].id,
+                                            onTap: () => _onPresetTap(rest[i + 1]),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              } else {
+                                rows.add(
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: gap),
+                                    child: PresetOptionCard(
+                                      preset: rest[i],
+                                      selected: _selected?.id == rest[i].id,
+                                      onTap: () => _onPresetTap(rest[i]),
+                                      horizontal: true,
+                                    ),
+                                  ),
+                                );
+                              }
+                            }
+
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: rows,
                             );
                           },
-                          childCount: kCompressionPresets.length,
                         ),
                       ),
                     ),

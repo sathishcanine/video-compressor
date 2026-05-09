@@ -35,6 +35,10 @@ class VideoInfoCard extends StatelessWidget {
     final ext = p.extension(file.path).replaceFirst('.', '').toUpperCase();
     final name = p.basename(file.path);
 
+    final sw = size.width;
+    final sh = size.height;
+    final bool isPortrait = sw > 0 && sh > 0 && sh > sw;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
@@ -47,35 +51,58 @@ class VideoInfoCard extends StatelessWidget {
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(16),
-            child: AspectRatio(
-              aspectRatio: size.width == 0 || size.height == 0 ? 16 / 9 : size.aspectRatio,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  VideoPlayer(controller),
-                  Center(
-                    child: Container(
-                      width: 56,
-                      height: 56,
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.35),
-                        shape: BoxShape.circle,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final w = constraints.maxWidth;
+                if (sw == 0 || sh == 0) {
+                  return AspectRatio(
+                    aspectRatio: 16 / 9,
+                    child: _previewStack(controller, res, duration),
+                  );
+                }
+                final videoAr = sw / sh;
+                final fullHeight = w / videoAr;
+                final h = isPortrait ? fullHeight * 0.5 : fullHeight;
+                return SizedBox(
+                  width: w,
+                  height: h,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      ColoredBox(color: Colors.black.withValues(alpha: 0.2)),
+                      FittedBox(
+                        fit: BoxFit.contain,
+                        child: SizedBox(
+                          width: sw,
+                          height: sh,
+                          child: VideoPlayer(controller),
+                        ),
                       ),
-                      child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 36),
-                    ),
+                      Center(
+                        child: Container(
+                          width: 56,
+                          height: 56,
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.35),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 36),
+                        ),
+                      ),
+                      Positioned(
+                        top: 10,
+                        left: 10,
+                        child: _pill(res),
+                      ),
+                      Positioned(
+                        right: 10,
+                        bottom: 10,
+                        child: _pill(_formatDuration(duration), icon: Icons.schedule_rounded),
+                      ),
+                    ],
                   ),
-                  Positioned(
-                    top: 10,
-                    left: 10,
-                    child: _pill(res),
-                  ),
-                  Positioned(
-                    right: 10,
-                    bottom: 10,
-                    child: _pill(_formatDuration(duration), icon: Icons.schedule_rounded),
-                  ),
-                ],
-              ),
+                );
+              },
             ),
           ),
           const SizedBox(height: 12),
@@ -107,6 +134,36 @@ class VideoInfoCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _previewStack(VideoPlayerController controller, String res, Duration duration) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        VideoPlayer(controller),
+        Center(
+          child: Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.35),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 36),
+          ),
+        ),
+        Positioned(
+          top: 10,
+          left: 10,
+          child: _pill(res),
+        ),
+        Positioned(
+          right: 10,
+          bottom: 10,
+          child: _pill(_formatDuration(duration), icon: Icons.schedule_rounded),
+        ),
+      ],
     );
   }
 
