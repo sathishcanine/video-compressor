@@ -7,10 +7,13 @@ typedef CompressionJob = Future<String> Function(void Function(double progress01
 class CompressingProgressDialog extends StatefulWidget {
   const CompressingProgressDialog({
     super.key,
+    this.title = 'Compressing Video',
     required this.presetLabel,
     required this.job,
   });
 
+  /// Headline above the preset / status line (e.g. "Joining clips").
+  final String title;
   final String presetLabel;
   final CompressionJob job;
 
@@ -65,7 +68,7 @@ class _CompressingProgressDialogState extends State<CompressingProgressDialog> {
             ),
             const SizedBox(height: 18),
             Text(
-              'Compressing Video',
+              widget.title,
               style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 8),

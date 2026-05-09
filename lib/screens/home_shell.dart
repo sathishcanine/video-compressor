@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import 'compress_screen.dart';
 import 'history_screen.dart';
+import 'pro_editing/pro_create_new_screen.dart';
+import 'video_edit_screen.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -21,13 +23,24 @@ class _HomeShellState extends State<HomeShell> {
         index: _index,
         children: const [
           CompressScreen(),
+          VideoEditScreen(),
           HistoryScreen(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
         height: 64,
         selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
+        onDestinationSelected: (i) {
+          if (i == 3) {
+            Navigator.of(context).push<void>(
+              MaterialPageRoute<void>(
+                builder: (_) => const ProCreateNewScreen(),
+              ),
+            );
+            return;
+          }
+          setState(() => _index = i);
+        },
         backgroundColor: Colors.white,
         indicatorColor: AppColors.primary.withValues(alpha: 0.12),
         destinations: const [
@@ -37,9 +50,19 @@ class _HomeShellState extends State<HomeShell> {
             label: 'Compress',
           ),
           NavigationDestination(
+            icon: Icon(Icons.movie_filter_outlined, color: AppColors.textSecondary),
+            selectedIcon: Icon(Icons.movie_filter_rounded, color: AppColors.primary),
+            label: 'Edit',
+          ),
+          NavigationDestination(
             icon: Icon(Icons.history_rounded, color: AppColors.textSecondary),
             selectedIcon: Icon(Icons.history_rounded, color: AppColors.primary),
             label: 'History',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.auto_awesome_outlined, color: AppColors.textSecondary),
+            selectedIcon: Icon(Icons.auto_awesome, color: AppColors.primary),
+            label: 'Pro',
           ),
         ],
       ),

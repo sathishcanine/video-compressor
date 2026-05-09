@@ -3,9 +3,16 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 
 class PickVideoPanel extends StatelessWidget {
-  const PickVideoPanel({super.key, required this.onPick});
+  const PickVideoPanel({
+    super.key,
+    required this.onPick,
+    this.title = 'Pick a Video',
+    this.subtitle = 'MP4, MOV, AVI and more',
+  });
 
   final VoidCallback onPick;
+  final String title;
+  final String subtitle;
 
   @override
   Widget build(BuildContext context) {
@@ -39,7 +46,7 @@ class PickVideoPanel extends StatelessWidget {
               ),
               const SizedBox(height: 18),
               Text(
-                'Pick a Video',
+                title,
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w800,
                       color: Colors.black,
@@ -47,7 +54,7 @@ class PickVideoPanel extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                'MP4, MOV, AVI and more',
+                subtitle,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: AppColors.textSecondary,
                     ),
