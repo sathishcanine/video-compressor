@@ -19,12 +19,16 @@ class ProTrimPanel extends StatefulWidget {
     required this.videoController,
     required this.videoPath,
     required this.onApplied,
+    this.initialTrimRange,
   });
 
   final ScrollController scrollController;
   final VideoPlayerController videoController;
   final String videoPath;
   final Future<void> Function(String newPath) onApplied;
+
+  /// Normalized 0–1 range matching the timeline trim handles, if any.
+  final RangeValues? initialTrimRange;
 
   @override
   State<ProTrimPanel> createState() => _ProTrimPanelState();
@@ -40,6 +44,17 @@ class _ProTrimPanelState extends State<ProTrimPanel> {
   @override
   void initState() {
     super.initState();
+    final totalMs = widget.videoController.value.duration.inMilliseconds;
+    final seed = widget.initialTrimRange;
+    if (seed != null && totalMs > 0) {
+      final a = seed.start.clamp(0.0, 1.0);
+      final b = seed.end.clamp(0.0, 1.0);
+      final minFrac = 400 / totalMs;
+      if (a < b && (b - a) >= minFrac) {
+        _range = RangeValues(a, b);
+        return;
+      }
+    }
     _range = const RangeValues(0, 1);
   }
 
@@ -232,6 +247,7 @@ Future<void> showProTrimSheet({
   required VideoPlayerController videoController,
   required String videoPath,
   required Future<void> Function(String newPath) onApplied,
+  RangeValues? initialTrimRange,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -249,6 +265,7 @@ Future<void> showProTrimSheet({
             videoController: videoController,
             videoPath: videoPath,
             onApplied: onApplied,
+            initialTrimRange: initialTrimRange,
           );
         },
       );

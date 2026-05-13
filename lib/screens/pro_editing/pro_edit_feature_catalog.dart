@@ -63,8 +63,7 @@ import 'package:flutter/material.dart';
 String proRibbonComingSoonMessage(String id) {
   switch (id) {
     case 'canvas':
-      return 'Change aspect ratio, fit, and background fill. Planned for a later release. '
-          'Use Rotate or Trim today to adjust framing.';
+      return 'Change aspect ratio, fit, and background fill from the Canvas tool on the ribbon.';
     case 'background':
       return 'Solid, blur, or image behind the video. Planned with Canvas. '
           'Trim and export cover the current workflow.';
@@ -109,8 +108,8 @@ String proRibbonComingSoonMessage(String id) {
 
 /// Shown under every "coming soon" sheet so users know what actually runs.
 const String kProEditorAvailableNowLine =
-    'Working now: Trim, Precut, Crop, Split, Speed, Volume, Audio (music bed), Rotate, Flip, Reverse, Duplicate, '
-    'Replace, Delete (leave editor), Export, Join clips (+), timeline mute & seek.';
+    'Working now: Canvas (ratio, zoom, backgrounds), Trim, Precut, Crop, Split, Speed, Volume, Audio (music bed), '
+    'Rotate, Flip, Reverse, Duplicate, Replace, Delete (leave editor), Export, Join clips (+), timeline mute & seek.';
 
 /// Single tool in the bottom horizontal ribbon (InShot-style).
 class ProRibbonToolDef {

@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:ffmpeg_kit_flutter_min_gpl/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_min_gpl/ffmpeg_kit_config.dart';
@@ -10,6 +12,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import 'video_compression_service.dart';
+import '../screens/pro_editing/pro_canvas_session.dart';
 
 /// FFmpeg helpers for Pro editing (trim, future: filters, etc.).
 final class VideoEditService {
@@ -368,6 +371,75 @@ final class VideoEditService {
     return parts.join(',');
   }
 
+  /// Picks a useful line from FFmpeg logs; avoids generic footers like "Conversion failed!".
+  static String _ffmpegUserFacingMessage(String logsRaw, Object? returnCode) {
+    final logs = logsRaw.trim();
+    final fallback = 'FFmpeg failed (code $returnCode)';
+    if (logs.isEmpty) return fallback;
+
+    final lines = logs
+        .split('\n')
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty)
+        .toList();
+    if (lines.isEmpty) return fallback;
+
+    bool isGenericFooter(String lower) =>
+        lower == 'conversion failed!' ||
+        lower.startsWith('press [q] to stop') ||
+        lower == 'exiting normally, received signal 2.';
+
+    for (var i = lines.length - 1; i >= 0; i--) {
+      final line = lines[i];
+      final lower = line.toLowerCase();
+      if (isGenericFooter(lower)) continue;
+      if (lower.contains('error') ||
+          lower.contains('invalid') ||
+          lower.contains('failed to') ||
+          lower.contains('could not') ||
+          lower.contains('unknown encoder') ||
+          lower.contains('padded dimensions') ||
+          lower.contains('reinitializing filters')) {
+        return line.length > 220 ? '${line.substring(0, 217)}…' : line;
+      }
+    }
+
+    for (var i = lines.length - 1; i >= 0; i--) {
+      final lower = lines[i].toLowerCase();
+      if (!isGenericFooter(lower)) {
+        final line = lines[i];
+        return line.length > 220 ? '${line.substring(0, 217)}…' : line;
+      }
+    }
+
+    return fallback;
+  }
+
+  static void _logFfmpegFailure({
+    required List<String> args,
+    required Object? returnCode,
+    required String logs,
+    required String message,
+  }) {
+    void chunk(String header, String body) {
+      const max = 3800;
+      if (body.length <= max) {
+        developer.log('$header$body', name: 'VidPress.FFmpeg');
+        return;
+      }
+      developer.log('$header(len=${body.length})', name: 'VidPress.FFmpeg');
+      for (var i = 0; i < body.length; i += max) {
+        final end = math.min(i + max, body.length);
+        developer.log(body.substring(i, end), name: 'VidPress.FFmpeg');
+      }
+    }
+
+    developer.log('FAILED rc=$returnCode | $message', name: 'VidPress.FFmpeg');
+    chunk('ARGS ', args.join(' '));
+    final t = logs.trim();
+    chunk('LOGS ', t.isEmpty ? '(empty)' : t);
+  }
+
   static Future<String> _encodeToTemp({
     required String inputPath,
     required List<String> encodeArgs,
@@ -392,9 +464,9 @@ final class VideoEditService {
             completer.complete(outPath);
           } else {
             final logs = await session.getLogsAsString();
-            completer.completeError(
-              Exception(logs.isNotEmpty ? logs.split('\n').last : 'FFmpeg failed (${rc?.getValue()})'),
-            );
+            final msg = _ffmpegUserFacingMessage(logs, rc?.getValue());
+            _logFfmpegFailure(args: args, returnCode: rc?.getValue(), logs: logs, message: msg);
+            completer.completeError(Exception(msg));
           }
         });
       },
@@ -782,6 +854,142 @@ final class VideoEditService {
     );
 
     return completer.future;
+  }
+
+  static int _evenDimension(int x) {
+    if (x < 2) return 2;
+    return (x ~/ 2) * 2;
+  }
+
+  /// Encodes a new MP4 with canvas framing (aspect, zoom, fill, rotation) matching [ProCanvasLayout].
+  ///
+  /// Copies [inputPath] to a temp file first so FFmpeg does not read the same path the
+  /// [VideoPlayer] may have open (avoids intermittent failures on repeat export).
+  static Future<String> applyCanvasComposition({
+    required String inputPath,
+    required ProCanvasSessionSettings session,
+    required double videoAspect,
+    required void Function(double progress01) onProgress,
+  }) async {
+    final tempDir = await getTemporaryDirectory();
+    final ext = p.extension(inputPath);
+    final safeExt = ext.isNotEmpty ? ext : '.mp4';
+    final srcCopy = p.join(
+      tempDir.path,
+      'vidpress_canvas_src_${DateTime.now().millisecondsSinceEpoch}$safeExt',
+    );
+    try {
+      await File(inputPath).copy(srcCopy);
+      final dims = await probeVideoStreamDimensions(srcCopy);
+      final iw = dims?.width ?? 0;
+      final ih = dims?.height ?? 0;
+      // Match [ProCanvasEditorPreview] / canvas UI: use display aspect from the player.
+      // Coded probe w/h often differs when rotation metadata is applied only in the player,
+      // which breaks scale/pad vs decoded frames for fixed ratios like 9:16.
+      final layoutAr = (videoAspect > 0 && videoAspect.isFinite)
+          ? videoAspect
+          : ((iw >= 2 && ih >= 2) ? iw / ih : 16 / 9);
+      final canvasAr = session.resolvedCanvasAspect(layoutAr);
+
+      const maxLong = 1920;
+      late final int outW;
+      late final int outH;
+      if (canvasAr >= 1.0) {
+        outW = _evenDimension(maxLong);
+        outH = _evenDimension((maxLong / canvasAr).round());
+      } else {
+        outH = _evenDimension(maxLong);
+        outW = _evenDimension((maxLong * canvasAr).round());
+      }
+
+      final cw = outW.toDouble();
+      final ch = outH.toDouble();
+      final contain = ProCanvasLayout.containVideo(cw, ch, layoutAr);
+      final scaleF = ProCanvasLayout.clampedVideoScale(
+        cw: cw,
+        ch: ch,
+        videoAr: layoutAr,
+        tiltRad: session.tiltRadians,
+        zoomSlider01: session.zoomSlider,
+        fillExpandMode: session.fillExpandMode,
+        pinchScale: session.pinchScale,
+      );
+      final fit = ProCanvasLayout.fittedVideoInContain(contain.bw, contain.bh, layoutAr);
+      var sw = _evenDimension((fit.rw * scaleF).round());
+      var sh = _evenDimension((fit.rh * scaleF).round());
+      sw = math.max(2, sw);
+      sh = math.max(2, sh);
+
+      final tilt = session.tiltRadians;
+      final bb = ProCanvasLayout.rotatedAabb(sw.toDouble(), sh.toDouble(), tilt);
+      final bbw = math.max(1, bb.w.ceil());
+      final bbh = math.max(1, bb.h.ceil());
+      final nxp = session.panNormX.clamp(-kProCanvasPanNormAbsMax, kProCanvasPanNormAbsMax);
+      final nyp = session.panNormY.clamp(-kProCanvasPanNormAbsMax, kProCanvasPanNormAbsMax);
+      final panPx = nxp * outW;
+      final panPy = nyp * outH;
+
+      final vfParts = <String>[
+        'format=yuv420p',
+        'scale=$sw:$sh:flags=lanczos',
+      ];
+      if (tilt.abs() > 1e-5) {
+        vfParts.add('rotate=${tilt.toStringAsFixed(6)}:fillcolor=black');
+      }
+
+      if (bbw > outW && bbh > outH) {
+        final oxRaw = (((bbw - outW) * 0.5) - panPx).round().clamp(0, bbw - outW);
+        final oyRaw = (((bbh - outH) * 0.5) - panPy).round().clamp(0, bbh - outH);
+        final ox = (oxRaw ~/ 2) * 2;
+        final oy = (oyRaw ~/ 2) * 2;
+        vfParts.add('crop=$outW:$outH:$ox:$oy');
+      } else if (bbw > outW && bbh <= outH) {
+        final bbhE = _evenDimension(bbh);
+        final oxRaw = (((bbw - outW) * 0.5) - panPx).round().clamp(0, bbw - outW);
+        final ox = (oxRaw ~/ 2) * 2;
+        vfParts.add('crop=$outW:$bbhE:$ox:0');
+        vfParts.add('pad=$outW:$outH:0:(oh-ih)/2:black');
+      } else if (bbh > outH && bbw <= outW) {
+        final bbwE = _evenDimension(bbw);
+        final oyRaw = (((bbh - outH) * 0.5) - panPy).round().clamp(0, bbh - outH);
+        final oy = (oyRaw ~/ 2) * 2;
+        vfParts.add('crop=$bbwE:$outH:0:$oy');
+        vfParts.add('pad=$outW:$outH:(ow-iw)/2:0:black');
+      } else {
+        final rangeX = math.max(0, outW - bbw);
+        final rangeY = math.max(0, outH - bbh);
+        final pxRaw = (((rangeX * 0.5) + panPx).round()).clamp(0, rangeX);
+        final pyRaw = (((rangeY * 0.5) + panPy).round()).clamp(0, rangeY);
+        final px = (pxRaw ~/ 2) * 2;
+        final py = (pyRaw ~/ 2) * 2;
+        vfParts.add('pad=$outW:$outH:$px:$py:black');
+      }
+      final vf = vfParts.join(',');
+
+      final durMs = await VideoCompressionService.probeDurationMs(srcCopy) ?? 0;
+      final hasAudio = await inputHasAudio(srcCopy);
+
+      return await _encodeToTemp(
+        inputPath: srcCopy,
+        encodeArgs: [
+          '-vf',
+          vf,
+          '-c:v',
+          'libx264',
+          '-preset',
+          'veryfast',
+          '-crf',
+          '20',
+          if (hasAudio) ...['-c:a', 'aac', '-b:a', '128k'] else '-an',
+          '-movflags',
+          '+faststart',
+        ],
+        progressDenomMs: durMs,
+        onProgress: onProgress,
+      );
+    } finally {
+      await deleteFileIfExists(srcCopy);
+    }
   }
 
   /// Copies file into a new temp path (for Duplicate).

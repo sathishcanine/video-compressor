@@ -4,7 +4,6 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:gal/gal.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 
@@ -13,9 +12,13 @@ import '../../widgets/pick_video_panel.dart';
 import '../../services/video_edit_service.dart';
 import 'pro_audio_session.dart';
 import 'pro_audio_sheet.dart';
+import 'pro_canvas_editor_preview.dart';
+import 'pro_canvas_screen.dart';
+import 'pro_canvas_session.dart';
 import 'pro_crop_sheet.dart';
 import 'pro_edit_feature_catalog.dart';
 import 'pro_editor_timeline.dart';
+import 'pro_export_result_screen.dart';
 import 'pro_phase3_tool_sheets.dart';
 import 'pro_studio_theme.dart';
 import 'pro_trim_panel.dart';
@@ -34,11 +37,18 @@ class _ProVideoEditorScreenState extends State<ProVideoEditorScreen> {
   List<Uint8List?> _thumbs = [];
   bool _clipMuted = false;
 
+  /// Timeline trim in-point / out-point (preview + trim sheet initial range).
+  Duration _timelineTrimStart = Duration.zero;
+  Duration _timelineTrimEnd = Duration.zero;
+
   /// Paths of FFmpeg trim outputs created this session (for cleanup).
   final List<String> _createdTrimPaths = [];
   final List<String> _undoStack = [];
   final List<String> _redoStack = [];
   ProAudioMixSession? _audioMixSession;
+
+  /// Framing from Canvas (✓); `null` = full-frame preview like before Canvas.
+  ProCanvasSessionSettings? _canvasSession;
 
   @override
   void dispose() {
@@ -67,6 +77,7 @@ class _ProVideoEditorScreenState extends State<ProVideoEditorScreen> {
     _undoStack.clear();
     _redoStack.clear();
     _audioMixSession = null;
+    _canvasSession = null;
     await _swap(file);
     if (!mounted) return;
     setState(() => _file = file);
@@ -80,6 +91,8 @@ class _ProVideoEditorScreenState extends State<ProVideoEditorScreen> {
     await next.pause();
     old?.dispose();
     _controller = next;
+    _timelineTrimStart = Duration.zero;
+    _timelineTrimEnd = next.value.duration;
     await _regenerateThumbs(file.path, next.value.duration);
     if (mounted) setState(() {});
   }
@@ -232,10 +245,19 @@ class _ProVideoEditorScreenState extends State<ProVideoEditorScreen> {
       }
       return;
     }
+    final d = c.value.duration;
+    RangeValues? initial;
+    if (d.inMilliseconds > 0) {
+      initial = RangeValues(
+        (_timelineTrimStart.inMilliseconds / d.inMilliseconds).clamp(0.0, 1.0),
+        (_timelineTrimEnd.inMilliseconds / d.inMilliseconds).clamp(0.0, 1.0),
+      );
+    }
     await showProTrimSheet(
       context: context,
       videoController: c,
       videoPath: f.path,
+      initialTrimRange: initial,
       onApplied: (newPath) => _commitEncodedOutput(newPath),
     );
   }
@@ -252,6 +274,21 @@ class _ProVideoEditorScreenState extends State<ProVideoEditorScreen> {
         return;
       case 'replace':
         _pickVideo();
+        return;
+      case 'canvas':
+        if (!ready) {
+          _snackVideoNotReady();
+          return;
+        }
+        showProCanvasScreen(
+          context,
+          controller: c,
+          videoPath: f.path,
+          initialSession: _canvasSession,
+        ).then((applied) {
+          if (!mounted) return;
+          if (applied != null) setState(() => _canvasSession = applied);
+        });
         return;
       case 'audio':
         if (!ready) {
@@ -416,6 +453,7 @@ class _ProVideoEditorScreenState extends State<ProVideoEditorScreen> {
   void _openExportSheet() {
     final f = _file;
     if (f == null) return;
+    final hasCanvas = _canvasSession != null;
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: const Color(0xFF1E1E1E),
@@ -435,20 +473,43 @@ class _ProVideoEditorScreenState extends State<ProVideoEditorScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Save a copy to Photos or share the current edit.',
+                hasCanvas
+                    ? 'Save copies to Photos with canvas applied. View export opens a preview where you can play and share.'
+                    : 'Save adds the clip to Photos. View export opens a preview where you can play and share.',
                 style: Theme.of(ctx).textTheme.bodySmall?.copyWith(color: Colors.white60, height: 1.35),
               ),
               const SizedBox(height: 20),
               FilledButton.icon(
                 onPressed: () async {
                   Navigator.pop(ctx);
-                  try {
-                    await Gal.putVideo(f.path);
-                    if (!mounted) return;
+                  final outPath = await _encodeForExportIfNeeded();
+                  if (!mounted) return;
+                  if (outPath == null) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Saved to gallery'), behavior: SnackBarBehavior.floating),
+                      const SnackBar(
+                        content: Text('Could not prepare export.'),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                    return;
+                  }
+                  try {
+                    await Gal.putVideo(outPath);
+                    if (!mounted) return;
+                    final isTemp = outPath != f.path;
+                    await Navigator.of(context).push<void>(
+                      MaterialPageRoute<void>(
+                        builder: (_) => ProExportResultScreen(
+                          videoPath: outPath,
+                          deleteOnDispose: isTemp,
+                          savedToGallery: true,
+                        ),
+                      ),
                     );
                   } catch (e) {
+                    if (outPath != f.path) {
+                      await VideoEditService.deleteFileIfExists(outPath);
+                    }
                     if (!mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text('Could not save: $e'), behavior: SnackBarBehavior.floating),
@@ -463,10 +524,30 @@ class _ProVideoEditorScreenState extends State<ProVideoEditorScreen> {
               OutlinedButton.icon(
                 onPressed: () async {
                   Navigator.pop(ctx);
-                  await Share.shareXFiles([XFile(f.path)], text: 'Edited with VidPress');
+                  final outPath = await _encodeForExportIfNeeded();
+                  if (!mounted) return;
+                  if (outPath == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Could not prepare export.'),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                    return;
+                  }
+                  final isTemp = outPath != f.path;
+                  await Navigator.of(context).push<void>(
+                    MaterialPageRoute<void>(
+                      builder: (_) => ProExportResultScreen(
+                        videoPath: outPath,
+                        deleteOnDispose: isTemp,
+                        savedToGallery: false,
+                      ),
+                    ),
+                  );
                 },
-                icon: const Icon(Icons.share_rounded, color: Colors.white),
-                label: const Text('Share', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+                icon: const Icon(Icons.slideshow_rounded, color: Colors.white),
+                label: const Text('View export', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
                 style: OutlinedButton.styleFrom(
                   side: const BorderSide(color: Colors.white24),
                   padding: const EdgeInsets.symmetric(vertical: 14),
@@ -477,6 +558,37 @@ class _ProVideoEditorScreenState extends State<ProVideoEditorScreen> {
         ),
       ),
     );
+  }
+
+  /// Returns a path to an MP4 for gallery/share: re-encoded when canvas is active, else the source [File] path.
+  Future<String?> _encodeForExportIfNeeded() async {
+    final f = _file;
+    final c = _controller;
+    if (f == null) return null;
+    final session = _canvasSession;
+    if (session == null || c == null || !c.value.isInitialized) {
+      return f.path;
+    }
+    await c.pause();
+    if (mounted) setState(() {});
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    if (!mounted) return null;
+    final out = await showDialog<String?>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => CompressingProgressDialog(
+        title: 'Applying canvas',
+        presetLabel: 'Canvas framing (H.264)',
+        job: (setProgress) => VideoEditService.applyCanvasComposition(
+          inputPath: f.path,
+          session: session,
+          videoAspect: ProCanvasLayout.videoAspect(c),
+          onProgress: setProgress,
+        ),
+      ),
+    );
+    if (out == null || out.isEmpty) return null;
+    return out;
   }
 
   void _comingSoonSheet(String id, String label) {
@@ -583,39 +695,45 @@ class _ProVideoEditorScreenState extends State<ProVideoEditorScreen> {
                 ? Column(
                     children: [
                       Expanded(
-                        child: GestureDetector(
-                          onTap: _togglePlay,
-                          child: Container(
-                            width: double.infinity,
-                            color: Colors.black,
-                            child: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                Center(
-                                  child: AspectRatio(
-                                    aspectRatio: c.value.aspectRatio == 0 ? 16 / 9 : c.value.aspectRatio,
-                                    child: VideoPlayer(c),
+                        child: _canvasSession != null
+                            ? ProCanvasEditorPreview(
+                                controller: c,
+                                session: _canvasSession!,
+                                onTap: _togglePlay,
+                              )
+                            : GestureDetector(
+                                onTap: _togglePlay,
+                                child: Container(
+                                  width: double.infinity,
+                                  color: Colors.black,
+                                  child: Stack(
+                                    fit: StackFit.expand,
+                                    children: [
+                                      Center(
+                                        child: AspectRatio(
+                                          aspectRatio: c.value.aspectRatio == 0 ? 16 / 9 : c.value.aspectRatio,
+                                          child: VideoPlayer(c),
+                                        ),
+                                      ),
+                                      Positioned(
+                                        right: 10,
+                                        bottom: 10,
+                                        child: Text(
+                                          'VidPress',
+                                          style: TextStyle(
+                                            color: Colors.white.withValues(alpha: 0.55),
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 13,
+                                            shadows: const [
+                                              Shadow(blurRadius: 4, color: Colors.black54),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                                Positioned(
-                                  right: 10,
-                                  bottom: 10,
-                                  child: Text(
-                                    'VidPress',
-                                    style: TextStyle(
-                                      color: Colors.white.withValues(alpha: 0.55),
-                                      fontWeight: FontWeight.w800,
-                                      fontSize: 13,
-                                      shadows: const [
-                                        Shadow(blurRadius: 4, color: Colors.black54),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
+                              ),
                       ),
                       _playbackBar(c),
                       _ribbon(),
@@ -797,24 +915,14 @@ class _ProVideoEditorScreenState extends State<ProVideoEditorScreen> {
   Widget _timelineBlock(VideoPlayerController c) {
     return Container(
       width: double.infinity,
-      color: const Color(0xFF080808),
+      color: const Color(0xFF1A1A1A),
       padding: const EdgeInsets.fromLTRB(8, 6, 12, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.only(left: 112, bottom: 2),
-            child: Text(
-              'Select one track to edit. Tap + to append another clip.',
-              style: TextStyle(
-                color: const Color(0xFFFFD700).withValues(alpha: 0.95),
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
+
           Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Material(
                 color: Colors.red,
@@ -844,7 +952,7 @@ class _ProVideoEditorScreenState extends State<ProVideoEditorScreen> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'Mute\nClip',
+                        'Mute clip',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.55),
@@ -862,13 +970,13 @@ class _ProVideoEditorScreenState extends State<ProVideoEditorScreen> {
                 child: ProEditorTimeline(
                   controller: c,
                   thumbnails: _thumbs,
+                  trimStart: _timelineTrimStart,
+                  trimEnd: _timelineTrimEnd,
+                  onTrimStartChanged: (v) => setState(() => _timelineTrimStart = v),
+                  onTrimEndChanged: (v) => setState(() => _timelineTrimEnd = v),
                 ),
               ),
             ],
-          ),
-          Padding(
-            padding: const EdgeInsets.only(left: 116, top: 4),
-            child: ProEditorTimeRuler(duration: c.value.duration),
           ),
         ],
       ),
