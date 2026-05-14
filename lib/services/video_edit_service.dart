@@ -861,6 +861,19 @@ final class VideoEditService {
     return (x ~/ 2) * 2;
   }
 
+  /// Crop that never exceeds the incoming frame (`iw`×`ih`).
+  ///
+  /// Our [ProCanvasLayout.rotatedAabb] can be 1px larger than FFmpeg's [rotate] output
+  /// (rounding / chroma), which otherwise triggers: "Invalid too big or non positive size".
+  /// Commas inside filter expressions must be escaped as `\,` for the `-vf` parser.
+  static String _ffmpegSafeCrop(int cropW, int cropH, int cropX, int cropY) {
+    return 'crop=min($cropW\\,iw):min($cropH\\,ih):'
+        'min($cropX\\,max(0\\,iw-min($cropW\\,iw))):'
+        'min($cropY\\,max(0\\,ih-min($cropH\\,ih)))';
+  }
+
+  static const String _ffmpegPadCenter = '(ow-iw)/2:(oh-ih)/2';
+
   /// Encodes a new MP4 with canvas framing (aspect, zoom, fill, rotation) matching [ProCanvasLayout].
   ///
   /// Copies [inputPath] to a temp file first so FFmpeg does not read the same path the
@@ -942,19 +955,20 @@ final class VideoEditService {
         final oyRaw = (((bbh - outH) * 0.5) - panPy).round().clamp(0, bbh - outH);
         final ox = (oxRaw ~/ 2) * 2;
         final oy = (oyRaw ~/ 2) * 2;
-        vfParts.add('crop=$outW:$outH:$ox:$oy');
+        vfParts.add(_ffmpegSafeCrop(outW, outH, ox, oy));
+        vfParts.add('pad=$outW:$outH:$_ffmpegPadCenter:black');
       } else if (bbw > outW && bbh <= outH) {
         final bbhE = _evenDimension(bbh);
         final oxRaw = (((bbw - outW) * 0.5) - panPx).round().clamp(0, bbw - outW);
         final ox = (oxRaw ~/ 2) * 2;
-        vfParts.add('crop=$outW:$bbhE:$ox:0');
-        vfParts.add('pad=$outW:$outH:0:(oh-ih)/2:black');
+        vfParts.add(_ffmpegSafeCrop(outW, bbhE, ox, 0));
+        vfParts.add('pad=$outW:$outH:$_ffmpegPadCenter:black');
       } else if (bbh > outH && bbw <= outW) {
         final bbwE = _evenDimension(bbw);
         final oyRaw = (((bbh - outH) * 0.5) - panPy).round().clamp(0, bbh - outH);
         final oy = (oyRaw ~/ 2) * 2;
-        vfParts.add('crop=$bbwE:$outH:0:$oy');
-        vfParts.add('pad=$outW:$outH:(ow-iw)/2:0:black');
+        vfParts.add(_ffmpegSafeCrop(bbwE, outH, 0, oy));
+        vfParts.add('pad=$outW:$outH:$_ffmpegPadCenter:black');
       } else {
         final rangeX = math.max(0, outW - bbw);
         final rangeY = math.max(0, outH - bbh);
