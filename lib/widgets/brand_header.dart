@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
+import 'app_logo.dart';
 
 class BrandHeader extends StatelessWidget {
   const BrandHeader({super.key});
@@ -10,15 +11,7 @@ class BrandHeader extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          width: 48,
-          height: 48,
-          decoration: BoxDecoration(
-            color: AppColors.primary,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: const Icon(Icons.videocam_rounded, color: Colors.white, size: 26),
-        ),
+        const AppLogo(size: 48, borderRadius: 14),
         const SizedBox(width: 14),
         Expanded(
           child: Column(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
+import 'app_logo.dart';
 
 typedef CompressionJob = Future<String> Function(void Function(double progress01) onProgress);
 
@@ -54,15 +55,7 @@ class _CompressingProgressDialogState extends State<CompressingProgressDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                color: AppColors.primary.withValues(alpha: 0.12),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.videocam_rounded, color: AppColors.primary, size: 30),
-            ),
+            const AppLogo(size: 64, borderRadius: 18),
             const SizedBox(height: 18),
             Text(
               'Compressing Video',
