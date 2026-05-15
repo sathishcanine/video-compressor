@@ -1,35 +1,50 @@
+/// One stacked music bed in the audio timeline (path + per-track linear gain).
+class ProAudioMusicLayer {
+  const ProAudioMusicLayer({
+    required this.path,
+    required this.linearGain,
+  });
+
+  final String path;
+  /// Linear multiplier (1.0 = nominal), same range as FFmpeg volume in the mixer.
+  final double linearGain;
+
+  ProAudioMusicLayer copyWith({String? path, double? linearGain}) {
+    return ProAudioMusicLayer(
+      path: path ?? this.path,
+      linearGain: linearGain ?? this.linearGain,
+    );
+  }
+}
+
 /// Last successful audio mix in the current editor session.
 ///
 /// [clipPathAfterMix] must equal the current clip file path for this session to
-/// stay valid (reopen sheet with remembered track & levels). Undo, trim, or any
-/// step that changes the file invalidates it.
+/// stay valid (reopen with remembered layers). Undo, trim, or any step that
+/// changes the file invalidates it.
 class ProAudioMixSession {
   const ProAudioMixSession({
-    required this.musicPath,
+    required this.musicLayers,
     required this.clipLinearGain,
-    required this.musicLinearGain,
     required this.clipPathAfterMix,
     required this.mixIndex,
   });
 
-  final String musicPath;
+  final List<ProAudioMusicLayer> musicLayers;
   final double clipLinearGain;
-  final double musicLinearGain;
   final String clipPathAfterMix;
   /// 1 = first mix applied to this clip lineage at [clipPathAfterMix].
   final int mixIndex;
 
   ProAudioMixSession copyWith({
-    String? musicPath,
+    List<ProAudioMusicLayer>? musicLayers,
     double? clipLinearGain,
-    double? musicLinearGain,
     String? clipPathAfterMix,
     int? mixIndex,
   }) {
     return ProAudioMixSession(
-      musicPath: musicPath ?? this.musicPath,
+      musicLayers: musicLayers ?? this.musicLayers,
       clipLinearGain: clipLinearGain ?? this.clipLinearGain,
-      musicLinearGain: musicLinearGain ?? this.musicLinearGain,
       clipPathAfterMix: clipPathAfterMix ?? this.clipPathAfterMix,
       mixIndex: mixIndex ?? this.mixIndex,
     );

@@ -297,7 +297,12 @@ class _ProVideoEditorScreenState extends State<ProVideoEditorScreen> {
         }
         showProAudioSheet(
           context,
+          controller: c,
           videoPath: f.path,
+          thumbnails: _thumbs,
+          trimStart: _timelineTrimStart,
+          trimEnd: _timelineTrimEnd,
+          canvasSession: _canvasSession,
           initialSession: _audioMixSession,
           onCommit: _commitAudioMixOutput,
           onForgetSession: () {

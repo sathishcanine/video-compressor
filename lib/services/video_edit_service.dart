@@ -721,49 +721,93 @@ final class VideoEditService {
     required double clipLinearGain,
     required double musicLinearGain,
     required void Function(double progress01) onProgress,
+  }) {
+    return mixBackgroundMusicLayers(
+      videoPath: videoPath,
+      clipLinearGain: clipLinearGain,
+      musicLayers: [(path: musicPath, linearGain: musicLinearGain)],
+      onProgress: onProgress,
+    );
+  }
+
+  /// Mixes one or more music beds with the clip's audio (or music-only if the clip has no audio).
+  static Future<String> mixBackgroundMusicLayers({
+    required String videoPath,
+    required double clipLinearGain,
+    required List<({String path, double linearGain})> musicLayers,
+    required void Function(double progress01) onProgress,
   }) async {
+    if (musicLayers.isEmpty) {
+      throw ArgumentError('At least one music layer is required');
+    }
+    for (final layer in musicLayers) {
+      if (layer.path.isEmpty || !File(layer.path).existsSync()) {
+        throw StateError('A music file is missing or was deleted');
+      }
+    }
+
     final vDurMs = await VideoCompressionService.probeDurationMs(videoPath) ?? 0;
     if (vDurMs <= 0) {
       throw StateError('Could not read video duration');
     }
-    final mDurMs = await VideoCompressionService.probeDurationMs(musicPath) ?? 0;
-    if (mDurMs <= 0) {
-      throw StateError('Could not read music duration or file has no audio');
+
+    final musicDurMs = <double>[];
+    for (final layer in musicLayers) {
+      final mDurMs = await VideoCompressionService.probeDurationMs(layer.path) ?? 0;
+      if (mDurMs <= 0) {
+        throw StateError('Could not read music duration or file has no audio');
+      }
+      if (!await inputHasAudio(layer.path)) {
+        throw StateError('The selected file has no audio track');
+      }
+      musicDurMs.add(mDurMs);
     }
+
     final hasClipAudio = await inputHasAudio(videoPath);
-    if (!await inputHasAudio(musicPath)) {
-      throw StateError('The selected file has no audio track');
-    }
 
     await _ensureStatistics();
     final tempDir = await getTemporaryDirectory();
     final outPath = p.join(tempDir.path, 'vidpress_audio_mix_${DateTime.now().millisecondsSinceEpoch}.mp4');
 
     final vSec = (vDurMs / 1000.0).clamp(0.01, 864000.0);
-    final musicLenSec = (mDurMs / 1000.0).clamp(0.001, 864000.0);
-    final trimMusicSec = musicLenSec < vSec ? musicLenSec : vSec;
     final vSecStr = vSec.toStringAsFixed(3);
-    final trimMusicStr = trimMusicSec.toStringAsFixed(3);
     final cg = clipLinearGain.clamp(0.0, 4.0);
-    final mg = musicLinearGain.clamp(0.0, 4.0);
 
-    final String filterComplex;
+    final fcParts = <String>[];
+    final mixLabels = <String>[];
+
     if (hasClipAudio) {
-      filterComplex = '[0:a]aformat=channel_layouts=stereo,aresample=48000,asetpts=PTS-STARTPTS[va];'
-          '[1:a]aformat=channel_layouts=stereo,aresample=48000,atrim=end=$trimMusicStr,asetpts=PTS-STARTPTS,apad=whole_dur=$vSecStr[ma];'
-          '[va]volume=${cg.toStringAsFixed(3)}[vag];'
-          '[ma]volume=${mg.toStringAsFixed(3)}[mag];'
-          '[vag][mag]amix=inputs=2:duration=first:normalize=0[outa]';
-    } else {
-      filterComplex = '[1:a]aformat=channel_layouts=stereo,aresample=48000,atrim=end=$trimMusicStr,asetpts=PTS-STARTPTS,apad=whole_dur=$vSecStr[ma];'
-          '[ma]volume=${mg.toStringAsFixed(3)}[outa]';
+      fcParts.add(
+        '[0:a]aformat=channel_layouts=stereo,aresample=48000,asetpts=PTS-STARTPTS,volume=${cg.toStringAsFixed(3)}[va]',
+      );
+      mixLabels.add('[va]');
     }
+
+    for (var i = 0; i < musicLayers.length; i++) {
+      final layer = musicLayers[i];
+      final mDur = musicDurMs[i];
+      final musicLenSec = (mDur / 1000.0).clamp(0.001, 864000.0);
+      final trimMusicSec = math.min(musicLenSec, vSec);
+      final trimMusicStr = trimMusicSec.toStringAsFixed(3);
+      final mg = layer.linearGain.clamp(0.0, 4.0);
+      final inputIdx = i + 1;
+      final label = 'ml$i';
+      fcParts.add(
+        '[$inputIdx:a]aformat=channel_layouts=stereo,aresample=48000,atrim=end=$trimMusicStr,asetpts=PTS-STARTPTS,'
+        'apad=whole_dur=$vSecStr,volume=${mg.toStringAsFixed(3)}[$label]',
+      );
+      mixLabels.add('[$label]');
+    }
+
+    fcParts.add('${mixLabels.join('')}amix=inputs=${mixLabels.length}:duration=first:normalize=0[outa]');
+    final filterComplex = fcParts.join(';');
+
+    final inputPaths = <String>[videoPath, ...musicLayers.map((e) => e.path)];
 
     onProgress(0);
     try {
-      return await _runAudioMixJob(
-        videoPath: videoPath,
-        musicPath: musicPath,
+      return await _runAudioMixJobMulti(
+        inputPaths: inputPaths,
         filterComplex: filterComplex,
         outPath: outPath,
         progressDenomMs: vDurMs.toDouble(),
@@ -773,9 +817,8 @@ final class VideoEditService {
     } catch (_) {
       await deleteFileIfExists(outPath);
       onProgress(0);
-      return await _runAudioMixJob(
-        videoPath: videoPath,
-        musicPath: musicPath,
+      return await _runAudioMixJobMulti(
+        inputPaths: inputPaths,
         filterComplex: filterComplex,
         outPath: outPath,
         progressDenomMs: vDurMs.toDouble(),
@@ -785,15 +828,18 @@ final class VideoEditService {
     }
   }
 
-  static Future<String> _runAudioMixJob({
-    required String videoPath,
-    required String musicPath,
+  static Future<String> _runAudioMixJobMulti({
+    required List<String> inputPaths,
     required String filterComplex,
     required String outPath,
     required double progressDenomMs,
     required void Function(double progress01) onProgress,
     required bool copyVideo,
   }) async {
+    if (inputPaths.isEmpty) {
+      throw StateError('No inputs');
+    }
+
     final videoCodec = copyVideo
         ? <String>['-c:v', 'copy']
         : <String>[
@@ -805,12 +851,11 @@ final class VideoEditService {
             '20',
           ];
 
-    final args = <String>[
-      '-y',
-      '-i',
-      videoPath,
-      '-i',
-      musicPath,
+    final args = <String>['-y'];
+    for (final path in inputPaths) {
+      args.addAll(['-i', path]);
+    }
+    args.addAll([
       '-filter_complex',
       filterComplex,
       '-map',
@@ -825,7 +870,7 @@ final class VideoEditService {
       '-movflags',
       '+faststart',
       outPath,
-    ];
+    ]);
 
     final completer = Completer<String>();
 
