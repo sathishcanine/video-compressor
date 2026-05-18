@@ -1,9 +1,29 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+    id("com.google.gms.google-services")
+    id("com.google.firebase.crashlytics")
 }
+
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
+}
+
+val storeFilePath = keystoreProperties.getProperty("storeFile")
+val releaseStoreFile = storeFilePath?.let { rootProject.file(it) }
+val releaseSigningReady =
+    keystorePropertiesFile.exists() &&
+        releaseStoreFile != null &&
+        releaseStoreFile.isFile &&
+        !keystoreProperties.getProperty("keyAlias").isNullOrBlank() &&
+        !keystoreProperties.getProperty("keyPassword").isNullOrBlank() &&
+        !keystoreProperties.getProperty("storePassword").isNullOrBlank()
 
 android {
     namespace = "com.vidcompressor.vidcompressor"
@@ -31,11 +51,26 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (releaseSigningReady) {
+            create("release") {
+                keyAlias = keystoreProperties.getProperty("keyAlias")!!.trim()
+                keyPassword = keystoreProperties.getProperty("keyPassword")!!.trim()
+                storeFile = releaseStoreFile!!
+                storePassword = keystoreProperties.getProperty("storePassword")!!.trim()
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig =
+                if (releaseSigningReady) {
+                    signingConfigs.getByName("release")
+                } else {
+                    // Add android/key.properties and android/app/upload-keystore.jks for Play uploads.
+                    signingConfigs.getByName("debug")
+                }
         }
     }
 }

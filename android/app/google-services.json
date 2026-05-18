@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1069622834231",
+    "project_id": "vidpress-26e55",
+    "storage_bucket": "vidpress-26e55.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1069622834231:android:209e5d55399f9257abbbb2",
+        "android_client_info": {
+          "package_name": "com.vidcompressor.vidcompressor"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD7MvEqE1hbaVwwKg4Tlc4NMfxLz7FmzsI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

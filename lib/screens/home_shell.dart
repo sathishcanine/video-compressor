@@ -1,5 +1,8 @@
+import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:flutter/material.dart';
 
+import '../bootstrap/firebase_bootstrap.dart';
+import '../services/force_update.dart';
 import '../theme/app_colors.dart';
 import 'compress_screen.dart';
 import 'history_screen.dart';
@@ -13,6 +16,17 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted || !firebaseReady) return;
+      await FirebaseAnalytics.instance.logScreenView(screenName: 'home');
+      if (!mounted) return;
+      await maybeShowForceUpdateDialog(context);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
